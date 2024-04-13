@@ -30,6 +30,10 @@
 #ifndef _ADDRSPACE_H_
 #define _ADDRSPACE_H_
 
+// ADDED():
+#define NUM_PD_ENTRY 2048
+#define NUM_PT_ENTRY 512
+
 /*
  * Address space structure and operations.
  */
@@ -48,6 +52,13 @@ struct vnode;
  * You write this.
  */
 
+struct region {
+	vaddr_t base_addr; // base address
+        size_t memsize; // region size in bytes
+        int permissions; // R/W/E permissions
+	struct region *next;
+};
+
 struct addrspace {
 #if OPT_DUMBVM
         vaddr_t as_vbase1;
@@ -59,6 +70,9 @@ struct addrspace {
         paddr_t as_stackpbase;
 #else
         /* Put stuff here for your VM system */
+        paddr_t **pagetable;
+        struct region *first; // first node of the linked list
+	
 #endif
 };
 

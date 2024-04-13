@@ -37,6 +37,8 @@
 #include <addrspace.h>
 #include <vm.h>
 #include <proc.h>
+/* ADDED():*/
+#include <elf.h>
 
 /*
  * Note! If OPT_DUMBVM is set, as is the case until you start the VM
@@ -62,6 +64,20 @@ as_create(void)
 	 * Initialize as needed.
 	 */
 
+	// initialize the region
+	as->first = NULL; 
+	
+	// initialize the page directory
+	paddr_t **page_dir = kmalloc(NUM_PD_ENTRY * sizeof(paddr_t *)); 
+	if(page_dir == NULL) {
+		kfree(as);
+		return NULL;
+	}
+	as->pagetable = page_dir;
+	for (int i = 0; i < NUM_PT_ENTRY; i++) {
+		page_dir[i] = NULL;
+	}
+	
 	return as;
 }
 
@@ -138,17 +154,64 @@ int
 as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
 		 int readable, int writeable, int executable)
 {
-	/*
-	 * Write this.
-	 */
 
-	(void)as;
-	(void)vaddr;
-	(void)memsize;
-	(void)readable;
-	(void)writeable;
-	(void)executable;
-	return ENOSYS; /* Unimplemented */
+	if (as == NULL) {
+        return EINVAL; // Invalid argument
+    }
+
+	// page alignment in dumbvm.c
+	/* Align the region. First, the base... */
+	memsize += vaddr & ~(vaddr_t)PAGE_FRAME;
+	vaddr &= PAGE_FRAME;
+
+	/* ...and now the length. */
+	memsize = (memsize + PAGE_SIZE - 1) & PAGE_FRAME;
+
+	int result = check_region(as, vaddr, memsize);
+	if (result) return result; // region invalid
+
+	struct region *new = malloc(sizeof(struct region));
+	if (new == NULL) {
+		return ENOMEM;
+	}
+
+	int permissions = 0;
+    if (readable) permissions |= PF_R;
+    if (writeable) permissions |= PF_W;
+    if (executable) permissions |= PF_X;
+
+	new->base_addr = vaddr;
+	new->memsize = memsize;
+	new->permissions = permissions;
+	new->next = NULL;
+
+}
+
+int check_region(struct addrspace *as, vaddr_t vaddr, size_t memsize) {
+    // Check if the ending address would wrap around.
+    if (vaddr + memsize < vaddr) {
+        return EINVAL;  // Address overflow, invalid region
+    }
+
+    // Assuming the definition of MIPS_KSEG0 or another limit for valid address space
+    if (vaddr + memsize > MIPS_KSEG0) {
+        return EFAULT;  // Address out of allowed range
+    }
+
+    struct region *curr = as->first;
+    while (curr != NULL) {
+        vaddr_t curr_end = curr->base_addr + curr->memsize;
+        vaddr_t new_end = vaddr + memsize;
+
+        // Check for any overlapping condition
+        if ((vaddr < curr_end && new_end > curr->base_addr) ||   // New region overlaps with current
+            (curr->base_addr < new_end && curr_end > vaddr)) {  // Current region overlaps with new
+            return EINVAL;  // Overlapping regions, invalid
+        }
+        curr = curr->next;
+    }
+
+    return 0;  // Valid region, no overlaps
 }
 
 int
