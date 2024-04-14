@@ -170,8 +170,8 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
 	int result = check_region(as, vaddr, memsize);
 	if (result) return result; // region invalid
 
-	struct region *new = malloc(sizeof(struct region));
-	if (new == NULL) {
+	struct region *new_region = malloc(sizeof(struct region));
+	if (new_region == NULL) {
 		return ENOMEM;
 	}
 
@@ -180,10 +180,14 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
     if (writeable) permissions |= PF_W;
     if (executable) permissions |= PF_X;
 
-	new->base_addr = vaddr;
-	new->memsize = memsize;
-	new->permissions = permissions;
-	new->next = NULL;
+	new_region->base_addr = vaddr;
+	new_region->memsize = memsize;
+	new_region->permissions = permissions;
+	new_region->next = NULL;
+
+	// insert new region to head of the linked list
+	new_region->next = as->first;
+	as->first = new_region;
 
 }
 
@@ -193,22 +197,22 @@ int check_region(struct addrspace *as, vaddr_t vaddr, size_t memsize) {
         return EINVAL;  // Address overflow, invalid region
     }
 
-    // Assuming the definition of MIPS_KSEG0 or another limit for valid address space
-    if (vaddr + memsize > MIPS_KSEG0) {
+	vaddr_t new_end = vaddr + memsize;
+    // region overlap with KSEG0
+    if (new_end > MIPS_KSEG0) {
         return EFAULT;  // Address out of allowed range
     }
 
     struct region *curr = as->first;
     while (curr != NULL) {
         vaddr_t curr_end = curr->base_addr + curr->memsize;
-        vaddr_t new_end = vaddr + memsize;
-
+        
         // Check for any overlapping condition
-        if ((vaddr < curr_end && new_end > curr->base_addr) ||   // New region overlaps with current
-            (curr->base_addr < new_end && curr_end > vaddr)) {  // Current region overlaps with new
+        if (vaddr < curr_end && new_end > curr->base_addr) { // New region overlaps with current
+            
             return EINVAL;  // Overlapping regions, invalid
         }
-        curr = curr->next;
+		curr = curr->next;
     }
 
     return 0;  // Valid region, no overlaps
