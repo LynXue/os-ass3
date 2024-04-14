@@ -108,7 +108,33 @@ as_destroy(struct addrspace *as)
 	 * Clean up as needed.
 	 */
 
+	// free PTE
+	for (int i = 0; i < NUM_PD_ENTRY; i++) {
+		if (as->pagetable[i] != NULL) {
+			for(int j = 0; j < NUM_PT_ENTRY; j++) {
+				if(as->pagetable[i][j] != PTE_UNALLOCATED) {
+					free_kpages(PADDR_TO_KVADDR(as->pagetable[i][j]) & PAGE_FRAME);
+				}
+			}
+			kfree(as->pagetable[i]);
+		}
+	}
+	kfree(as->pagetable);
+	//free linked list
+	free_regions(as);
+
 	kfree(as);
+}
+
+// clean up the linked list
+void free_regions(struct addrspace *as) {
+	struct region *temp;
+	struct region *curr = as->first;
+	while(curr != NULL) {
+		temp = curr;
+		curr = curr->next;
+		kfree(temp);
+	}
 }
 
 void
@@ -170,7 +196,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
 	int result = check_region(as, vaddr, memsize);
 	if (result) return result; // region invalid
 
-	struct region *new_region = malloc(sizeof(struct region));
+	struct region *new_region = kmalloc(sizeof(struct region));
 	if (new_region == NULL) {
 		return ENOMEM;
 	}
@@ -189,6 +215,7 @@ as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
 	new_region->next = as->first;
 	as->first = new_region;
 
+	return 0;
 }
 
 int check_region(struct addrspace *as, vaddr_t vaddr, size_t memsize) {
@@ -221,22 +248,71 @@ int check_region(struct addrspace *as, vaddr_t vaddr, size_t memsize) {
 int
 as_prepare_load(struct addrspace *as)
 {
-	/*
-	 * Write this.
-	 */
+	if (as == NULL) {
+		return EFAULT;
+	}
 
-	(void)as;
-	return 0;
+	struct region *curr = as->first;
+	while (curr != NULL) {
+		curr->old_permissions = curr->permissions; // save current permission 
+		curr->permissions |= PF_W; // upadate permission to writable
+		curr = curr->next; 
+	}
+
+	return 0; // successful
 }
 
 int
 as_complete_load(struct addrspace *as)
 {
-	/*
-	 * Write this.
-	 */
+	if (as == NULL) {
+		return EFAULT;
+	}
 
-	(void)as;
+    as_activate(); // Flush TLB 
+
+    paddr_t **pt = as->pagetable;
+    for(int i = 0; i < NUM_PD_ENTRY; i++) {
+        if (pt[i] != NULL) {
+            for(int j = 0; j < NUM_PT_ENTRY; j++) {
+                if (pt[i][j] != PTE_UNALLOCATED) {
+                    // Compose the virtual address from page directory and page table indices
+                    vaddr_t pd_index = i << 21;
+                    vaddr_t pt_index = j << 12;
+                    vaddr_t vaddr = pd_index | pt_index;
+
+                    // find matching region of the virtual address
+                    struct region *curr = as->first;
+					while (curr != NULL) {
+						if ((vaddr >= curr->base_addr) && (vaddr < (curr->base_addr + curr->memsize))) {
+							break;
+						}
+						curr = curr->next;
+					}
+                    
+					// check old permission, if doesn't have write permmison, remove write permission
+					if (!(curr->old_permissions & PF_W)) {
+						// remove write permmision
+						pt[i][j] = (pt[i][j] & PAGE_FRAME) & ~PF_W; 
+						// ensure PTE valid
+						pt[i][j] |= TLBLO_VALID;
+					}
+                }
+            }
+        }
+	}
+
+	struct region *curr = as->first; 
+    while (curr != NULL) {
+        // Restore the write permission state from old_permissions
+        if (curr->old_permissions & PF_W) {
+            curr->permissions |= PF_W;  // Set write permission if it was previously set
+        } else {
+            curr->permissions &= ~PF_W; // Clear write permission if it was not set
+        }
+        curr = curr->next; 
+    }
+
 	return 0;
 }
 
@@ -251,6 +327,8 @@ as_define_stack(struct addrspace *as, vaddr_t *stackptr)
 
 	/* Initial user-level stack pointer */
 	*stackptr = USERSTACK;
+
+	return as_define_region(as, *stackptr - USTACK_SIZE, USTACK_SIZE, 1, 1, 0);
 
 	return 0;
 }

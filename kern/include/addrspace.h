@@ -33,6 +33,7 @@
 // ADDED():
 #define NUM_PD_ENTRY 2048
 #define NUM_PT_ENTRY 512
+#define USTACK_SIZE 16 * PAGE_SIZE
 
 /*
  * Address space structure and operations.
@@ -56,6 +57,7 @@ struct region {
 	vaddr_t base_addr; // base address
         size_t memsize; // region size in bytes
         int permissions; // R/W/E permissions
+        int old_permissions;
 	struct region *next;
 };
 
@@ -131,6 +133,9 @@ int               as_define_region(struct addrspace *as,
 int               as_prepare_load(struct addrspace *as);
 int               as_complete_load(struct addrspace *as);
 int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
+
+void free_regions(struct addrspace *as);
+int check_region(struct addrspace *as, vaddr_t vaddr, size_t memsize);
 
 
 /*

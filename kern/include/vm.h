@@ -45,7 +45,7 @@
 #define VM_FAULT_READONLY    2    /* A write to a readonly page was attempted*/
 
 // ADDED():
-#define PTE_UNALLOCATED -1
+#define PTE_UNALLOCATED 0
 
 
 /* Initialization function */

@@ -9,8 +9,17 @@
 
 // ADDED():
 #include <elf.h>
+#include <proc.h>
+#include <spl.h>
 
 /* Place your page table functions here */
+
+int insert_pte(struct addrspace *as, vaddr_t vaddr, paddr_t paddr);
+int lookup_region(struct addrspace *as, vaddr_t vaddr, int faulttype);
+paddr_t lookup_pt(struct addrspace *as, vaddr_t vaddr);
+vaddr_t get_pd_bits(vaddr_t vaddr);
+vaddr_t get_pt_bits(vaddr_t vaddr);
+void load_tlb_entry(uint32_t entryhi, uint32_t entrylo);
 
 
 void vm_bootstrap(void)
@@ -65,8 +74,9 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         load_tlb_entry(faultaddress & PAGE_FRAME, as->pagetable[pd_index][pt_index]); 
         return 0; // return successful
     } else { // invalid translation => check whether in valid region
-        if (lookup_region(as, faultaddress, faulttype) == EFAULT) { // not in valid region
-            return EFAULT; 
+        int result = lookup_region(as, faultaddress, faulttype);
+        if (!result) { // not in valid region
+            return result; 
         } else {  // in valid region => allocate frame, zero-fill, insert PTE
             vaddr_t new_vaddr = alloc_kpages(1);
             if (new_vaddr == 0) return ENOMEM;
@@ -177,8 +187,8 @@ int lookup_region(struct addrspace *as, vaddr_t vaddr, int faulttype) {
 
 
 paddr_t lookup_pt(struct addrspace *as, vaddr_t vaddr) {
-    uint32_t pd_index = get_first_10_bits(vaddr); // Get the page directory index
-    uint32_t pt_index = get_middle_10_bits(vaddr); // Get the page table index
+    uint32_t pd_index = get_pd_bits(vaddr); // Get the page directory index
+    uint32_t pt_index = get_pt_bits(vaddr); // Get the page table index
 
     if (pd_index >= NUM_PD_ENTRY || pt_index >= NUM_PT_ENTRY) {
         return -1; // Index exceeds page table size
@@ -189,9 +199,9 @@ paddr_t lookup_pt(struct addrspace *as, vaddr_t vaddr) {
         return PTE_UNALLOCATED;
     }
 
-    paddr_t paddr = as->pagetable[pd_index][pt_index] & PAGE_FRAME; // Read the physical address
+    paddr_t paddr = as->pagetable[pd_index][pt_index]; // Read the entry content
 
-    return paddr; // Return the found physical address
+    return paddr; // return entry
 }
 
 
