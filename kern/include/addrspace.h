@@ -136,6 +136,7 @@ int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
 
 void free_regions(struct addrspace *as);
 int check_region(struct addrspace *as, vaddr_t vaddr, size_t memsize);
+int copy_pt(paddr_t **old_pt, paddr_t **new_pt);
 
 
 /*

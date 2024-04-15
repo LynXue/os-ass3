@@ -94,12 +94,80 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	/*
 	 * Write this.
 	 */
+	// copy all regions from old address space to new address space
+	struct region *old_curr = old->first;
+	struct region *new_tail = NULL;  // tail of the new regions list
 
-	(void)old;
+	while (old_curr != NULL) {
+		struct region *new_region = kmalloc(sizeof(struct region));
+		if (new_region == NULL) {
+			as_destroy(newas);
+			return ENOMEM;
+		}
+
+		// copy the current region's details to new region
+		new_region->base_addr = old_curr->base_addr;         
+		new_region->memsize = old_curr->memsize;            
+		new_region->permissions = old_curr->permissions;     
+		new_region->old_permissions = old_curr->old_permissions; 
+		new_region->next = NULL;  // ensure the new region points to NULL initially
+
+		// if new_tail is NULL, it's the first region in the list
+		if (new_tail == NULL) {
+			newas->first = new_region;
+		} else {
+			new_tail->next = new_region;  // link the new region at the end of the list
+		}
+		new_tail = new_region;  // update the tail to the new region
+		old_curr = old_curr->next;  // move to the next region in the old address space
+	}
+
+
+	// copy page table from old address space to new address space
+	int result = copy_pt(old->pagetable, newas->pagetable);
+	if (result) {
+		as_destroy(newas);
+		return result;
+	}
 
 	*ret = newas;
 	return 0;
 }
+
+int copy_pt(paddr_t **old_pt, paddr_t **new_pt)
+{
+	for(int i = 0; i < NUM_PD_ENTRY; i++) {
+		if(old_pt[i] != NULL) {
+			new_pt[i] = kmalloc(NUM_PD_ENTRY * sizeof(paddr_t));
+			if(new_pt[i] == NULL) {
+				return ENOMEM;
+			}
+			// copy the page table entry
+			for(int j = 0; j < NUM_PT_ENTRY; j++)
+			{
+				if(old_pt[i][j] != PTE_UNALLOCATED) {
+					vaddr_t new_vaddr = alloc_kpages(1);
+					if (new_vaddr == 0) {
+						return ENOMEM;  
+					}
+					bzero((void *) new_vaddr, PAGE_SIZE);
+					// copy content in old memory to new memory
+					memmove((void *) new_vaddr, (void *) PADDR_TO_KVADDR(old_pt[i][j] & PAGE_FRAME), PAGE_SIZE);
+					new_pt[i][j] = KVADDR_TO_PADDR(new_vaddr) & PAGE_FRAME;
+					new_pt[i][j] = new_pt[i][j] | (TLBLO_VALID & old_pt[i][j]) | (TLBLO_DIRTY & old_pt[i][j]);
+				} else {
+					new_pt[i][j] = PTE_UNALLOCATED;
+				}
+			}
+		} else {
+			new_pt[i] = NULL;
+		}
+	}
+
+	return 0;
+}
+
+
 
 void
 as_destroy(struct addrspace *as)
@@ -152,8 +220,17 @@ as_activate(void)
 	}
 
 	/*
-	 * Write this.
+	 * Write this. copy from dumbvm.c
 	 */
+
+	/* Disable interrupts on this CPU while frobbing the TLB. */
+	int spl = splhigh();
+
+	for (int i = 0; i < NUM_TLB; i++) {
+		tlb_write(TLBHI_INVALID(i), TLBLO_INVALID(), i);
+	}
+
+	splx(spl);
 }
 
 void
@@ -164,6 +241,8 @@ as_deactivate(void)
 	 * anything. See proc.c for an explanation of why it (might)
 	 * be needed.
 	 */
+
+	as_activate();
 }
 
 /*

@@ -75,7 +75,7 @@ vm_fault(int faulttype, vaddr_t faultaddress)
         return 0; // return successful
     } else { // invalid translation => check whether in valid region
         int result = lookup_region(as, faultaddress, faulttype);
-        if (!result) { // not in valid region
+        if (result) { // not in valid region
             return result; 
         } else {  // in valid region => allocate frame, zero-fill, insert PTE
             vaddr_t new_vaddr = alloc_kpages(1);
